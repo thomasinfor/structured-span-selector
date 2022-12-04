@@ -70,7 +70,12 @@ class CorefModel(torch.nn.Module):
 
         self.mention_token_attn = self.make_ffnn(self.bert_emb_size, 0, output_size=1) if config['model_heads'] else None
         if type(self.mention_proposer) == CFGMentionProposer:
-            self.span_emb_score_ffnn = self.make_ffnn(self.span_emb_size, [config['ffnn_size']] * config['ffnn_depth'], output_size=2)
+            self.span_emb_scorer = self.make_ffnn(self.span_emb_size + self.bert_emb_size, [config['ffnn_size']] * config['ffnn_depth'], output_size=2)
+            def span_emb_score_ffnn(candidate_span_emb, question_emb):
+                question_emb = question_emb.unsqueeze(0).expand(len(x), -1)
+                emb = torch.cat([candidate_span_emb, question_emb], dim=-1)
+                return self.span_emb_scorer(emb)
+            self.span_emb_score_ffnn = span_emb_score_ffnn
         elif type(self.mention_proposer) == GreedyMentionProposer:
             self.span_emb_score_ffnn = self.make_ffnn(self.span_emb_size, [config['ffnn_size']] * config['ffnn_depth'], output_size=1)
                 
@@ -153,10 +158,18 @@ class CorefModel(torch.nn.Module):
         flat_span_location_indices = spans.new_tensor(flat_span_location_indices)
         return flat_span_location_indices, sentence_lengths
     
-    def get_mention_doc(self, input_ids, input_mask, speaker_ids, sentence_len, genre, sentence_map,
-                                 is_training, gold_starts=None, gold_ends=None, gold_mention_cluster_map=None, 
-                                 coreferable_starts=None, coreferable_ends=None, 
-                                 constituent_starts=None, constituent_ends=None, constituent_type=None):
+    def get_mention_doc(
+        self,
+        input_ids,
+        input_mask,
+        sentence_len,
+        question_emb,
+        is_training,
+
+        gold_starts=None,
+        gold_ends=None,
+        gold_mention_cluster_map=None,
+    ):
         
         mention_doc = self.bert(input_ids, attention_mask=input_mask)  # [num seg, num max tokens, emb size]
         mention_doc = mention_doc["last_hidden_state"]
@@ -166,10 +179,16 @@ class CorefModel(torch.nn.Module):
         
     
     def get_predictions_and_loss(
-        self, mention_doc, input_ids, input_mask, speaker_ids, sentence_len, genre, sentence_map,
-        is_training, gold_starts=None, gold_ends=None, gold_mention_cluster_map=None, 
-        coreferable_starts=None, coreferable_ends=None, 
-        constituent_starts=None, constituent_ends=None, constituent_type=None
+        self,
+        input_ids,
+        input_mask,
+        sentence_len,
+        question_emb,
+        is_training,
+
+        gold_starts=None,
+        gold_ends=None,
+        gold_mention_cluster_map=None,
     ):
         """ Model and input are already on the device """
         device = self.device
@@ -182,8 +201,10 @@ class CorefModel(torch.nn.Module):
             do_loss = True
             
         input_mask = input_mask.bool()
-        speaker_ids = speaker_ids[input_mask]
+        # speaker_ids = speaker_ids[input_mask]
         num_words = mention_doc.shape[0]
+
+        sentence_map = torch.zeros(num_words, 1, device=device)
         
         self.all_words += num_words
         
@@ -216,11 +237,11 @@ class CorefModel(torch.nn.Module):
         # span_start_emb_1, span_end_emb_1 = mention_doc[candidate_starts], mention_doc[candidate_ends+1]
         # candidate_emb_list = [span_start_emb, span_end_emb]
         candidate_emb_list = [span_start_emb, span_end_emb]
-        if conf['use_features']:
-            candidate_width_idx = candidate_ends - candidate_starts
-            candidate_width_emb = self.emb_span_width(candidate_width_idx)
-            candidate_width_emb = self.dropout(candidate_width_emb)
-            candidate_emb_list.append(candidate_width_emb)
+        # if conf['use_features']:
+        #     candidate_width_idx = candidate_ends - candidate_starts
+        #     candidate_width_emb = self.emb_span_width(candidate_width_idx)
+        #     candidate_width_emb = self.dropout(candidate_width_emb)
+        #     candidate_emb_list.append(candidate_width_emb)
         # Use attended head or avg token
         candidate_tokens = torch.unsqueeze(torch.arange(0, num_words, device=device), 0).repeat(num_candidates, 1)
         candidate_tokens_mask = (candidate_tokens >= torch.unsqueeze(candidate_starts, 1)) & (candidate_tokens <= torch.unsqueeze(candidate_ends, 1))
@@ -236,18 +257,18 @@ class CorefModel(torch.nn.Module):
         candidate_span_emb = torch.cat(candidate_emb_list, dim=-1)  # [num candidates, new emb size]
 
         # Get span scores
-        candidate_mention_scores_and_parsing = self.span_emb_score_ffnn(candidate_span_emb)
-        
         if type(self.mention_proposer) == CFGMentionProposer:
+            candidate_mention_scores_and_parsing = self.span_emb_score_ffnn(candidate_span_emb, question_emb)
             candidate_mention_scores, candidate_mention_parsing_scores = candidate_mention_scores_and_parsing.split(1, dim=-1)
             candidate_mention_scores = candidate_mention_scores.squeeze(1)
         elif type(self.mention_proposer) == GreedyMentionProposer:
+            candidate_mention_scores_and_parsing = self.span_emb_score_ffnn(candidate_span_emb)
             candidate_mention_scores = candidate_mention_scores_and_parsing.squeeze(-1)
             candidate_mention_parsing_scores = candidate_mention_scores
             
-        if conf['use_width_prior']:
-            width_score = self.span_width_score_ffnn(self.emb_span_width_prior.weight).squeeze(1)
-            candidate_mention_scores = candidate_mention_scores + width_score[candidate_width_idx]
+        # if conf['use_width_prior']:
+        #     width_score = self.span_width_score_ffnn(self.emb_span_width_prior.weight).squeeze(1)
+        #     candidate_mention_scores = candidate_mention_scores + width_score[candidate_width_idx]
         
             
         spans = torch.stack([candidate_starts, candidate_ends], dim=-1)
@@ -285,7 +306,15 @@ class CorefModel(torch.nn.Module):
         top_span_emb = candidate_span_emb[selected_idx]
         top_span_cluster_ids = candidate_labels[selected_idx] if do_loss else None
         top_span_mention_scores = candidate_mention_scores[selected_idx]
-        
+        same_span = same_span[selected_idx]
+
+        if do_loss:
+            loss = same_span.sum()
+            # or negative score - positive score
+            # loss = top_span_mention_scores[torch.logical_not(same_span)] - top_span_mention_scores[same_span]
+            return [candidate_starts, candidate_ends, candidate_mention_parsing_scores, top_span_starts, top_span_ends], loss
+        else:
+            return candidate_starts, candidate_ends, candidate_mention_parsing_scores, top_span_starts, top_span_ends
         # Coarse pruning on each mention's antecedents
         max_top_antecedents = min(num_top_spans, conf['max_top_antecedents'])
         top_span_range = torch.arange(0, num_top_spans, device=device)

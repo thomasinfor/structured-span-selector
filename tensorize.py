@@ -79,11 +79,11 @@ class CorefDataProcessor:
                coreferable_starts, coreferable_ends, \
                constituent_starts, constituent_ends, constituent_type
 
-    def get_tensor_examples(self):
+    def get_tensor_examples(self): # TODO
         # For each split, return list of tensorized samples to allow variable length input (batch size = 1)
         return self.tensor_samples['trn'], self.tensor_samples['dev'], self.tensor_samples['tst']
 
-    def get_stored_info(self):
+    def get_stored_info(self): # TODO
         return self.stored_info
 
     def get_cache_path(self):
