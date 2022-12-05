@@ -33,18 +33,18 @@ class CorefDataProcessor:
                 self.tensor_samples = {}
                 tensorizer = Tensorizer(self.config)
                 paths = {
-                    'trn': join(self.data_dir, f'train.{language}.{self.max_seg_len}.jsonlines'),
-                    'dev': join(self.data_dir, f'dev.{language}.{self.max_seg_len}.jsonlines'),
-                    'tst': join(self.data_dir, f'test.{language}.{self.max_seg_len}.jsonlines')
+                    'trn': join(self.data_dir, f'train.json'),
+                    'dev': join(self.data_dir, f'dev.json'),
+                    'tst': join(self.data_dir, f'test.json')
                 }
                 for split, path in paths.items():
                     logger.info('Tensorizing examples from %s; results will be cached)' % path)
                     is_training = (split == 'trn')
                     with open(path, 'r') as f:
-                        samples = [json.loads(line) for line in f.readlines()]
-                    tensor_samples = [tensorizer.tensorize_example(sample, is_training) for sample in samples]
+                        samples = json.load(f)['data']
+                    tensor_samples = tensorizer.tensorize_example(samples, is_training)
                     print(len(tensor_samples[0]))
-                    self.tensor_samples[split] = [(doc_key, self.convert_to_torch_tensor(*tensor)) for doc_key, tensor in tensor_samples]
+                    self.tensor_samples[split] = [self.convert_to_torch_tensor(*tensor) for tensor in tensor_samples]
                 self.stored_info = tensorizer.stored_info
                 # Cache tensorized samples
                 with open(cache_path, 'wb') as f:
@@ -52,34 +52,21 @@ class CorefDataProcessor:
                 
 
     @classmethod
-    def convert_to_torch_tensor(cls, input_ids, input_mask, speaker_ids, sentence_len, genre, sentence_map,
-                                is_training, gold_starts, gold_ends, gold_mention_cluster_map,
-                                coreferable_starts, coreferable_ends,
-                                constituent_starts, constituent_ends, constituent_type):
+    def convert_to_torch_tensor(cls, input_ids, input_mask, sentence_len, question_emb, is_training, gold_starts, gold_ends, gold_mention_cluster_map): # TODO
         
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         input_mask = torch.tensor(input_mask, dtype=torch.long)
         speaker_ids = torch.tensor(speaker_ids, dtype=torch.long)
         sentence_len = torch.tensor(sentence_len, dtype=torch.long)
-        genre = torch.tensor(genre, dtype=torch.long)
-        sentence_map = torch.tensor(sentence_map, dtype=torch.long)
+        question_emb = torch.tensor(sentence_len, dtype=torch.float)
         is_training = torch.tensor(is_training, dtype=torch.bool)
         gold_starts = torch.tensor(gold_starts, dtype=torch.long)
         gold_ends = torch.tensor(gold_ends, dtype=torch.long)
         gold_mention_cluster_map = torch.tensor(gold_mention_cluster_map, dtype=torch.long)
-        coreferable_starts = torch.tensor(coreferable_starts, dtype=torch.long) if coreferable_starts is not None else None
-        coreferable_ends = torch.tensor(coreferable_ends, dtype=torch.long) if coreferable_ends is not None else None
         
-        constituent_starts = torch.tensor(constituent_starts, dtype=torch.long) if constituent_starts is not None else None
-        constituent_ends = torch.tensor(constituent_ends, dtype=torch.long) if constituent_ends is not None else None
-        constituent_type = None 
-        
-        return input_ids, input_mask, speaker_ids, sentence_len, genre, sentence_map, \
-               is_training, gold_starts, gold_ends, gold_mention_cluster_map, \
-               coreferable_starts, coreferable_ends, \
-               constituent_starts, constituent_ends, constituent_type
+        return input_ids, input_mask, sentence_len, question_emb, is_training, gold_starts, gold_ends, gold_mention_cluster_map
 
-    def get_tensor_examples(self): # TODO
+    def get_tensor_examples(self):
         # For each split, return list of tensorized samples to allow variable length input (batch size = 1)
         return self.tensor_samples['trn'], self.tensor_samples['dev'], self.tensor_samples['tst']
 
@@ -105,6 +92,7 @@ class Tensorizer:
         self.stored_info['gold'] = {}  # {doc_key: ...}
         self.stored_info['genre_dict'] = {genre: idx for idx, genre in enumerate(config['genres'])}
         self.stored_info['constituents'] = {}
+        self.bert = BertModel.from_pretrained(self.config['bert_pretrained_name_or_path'])
 
     def _tensorize_spans(self, spans):
         if len(spans) > 0:
@@ -129,71 +117,71 @@ class Tensorizer:
                 speaker_dict[speaker] = len(speaker_dict)
         return speaker_dict
 
-    def tensorize_example(self, example, is_training):
+    def tensorize_example(self, example, is_training): # TODO
         # Mentions and clusters
-        clusters = example['clusters']
-        gold_mentions = sorted(tuple(mention) for mention in util.flatten(clusters))
-        
-        gold_coreferables = sorted(tuple(mention) for mention in example["coreferables"]) if "coreferables" in example else None
-        gold_constituents = list(tuple(mention) for mention in example["constituents"]) if "constituents" in example else None
-        gold_constituent_type = list(example["constituent_type"]) if "constituent_type" in example else None
-        
-        gold_mention_map = {mention: idx for idx, mention in enumerate(gold_mentions)}
-        gold_mention_cluster_map = np.zeros(len(gold_mentions))  # 0: no cluster
-        for cluster_id, cluster in enumerate(clusters):
-            for mention in cluster:
-                gold_mention_cluster_map[gold_mention_map[tuple(mention)]] = cluster_id + 1
-
-        # Speakers
-        speakers = example['speakers']
-        speaker_dict = self._get_speaker_dict(util.flatten(speakers))
-
-        # Sentences/segments
-        sentences = example['sentences']  # Segments
-        sentence_map = example['sentence_map']
-        num_words = sum([len(s) for s in sentences])
         max_sentence_len = self.config['max_segment_len']
-        sentence_len = np.array([len(s) for s in sentences])
+        input_ids                = []
+        input_mask               = []
+        sentence_len             = []
+        question_emb             = []
+        gold_starts              = []
+        gold_ends                = []
+        gold_mention_cluster_map = []
 
-        # Bert input
-        input_ids, input_mask, speaker_ids = [], [], []
-        for idx, (sent_tokens, sent_speakers) in enumerate(zip(sentences, speakers)):
-            sent_input_ids = self.tokenizer.convert_tokens_to_ids(sent_tokens)
-            sent_input_mask = [1] * len(sent_input_ids)
-            sent_speaker_ids = [speaker_dict[speaker] for speaker in sent_speakers]
-            while len(sent_input_ids) < max_sentence_len:
-                sent_input_ids.append(0)
-                sent_input_mask.append(0)
-                sent_speaker_ids.append(0)
-            input_ids.append(sent_input_ids)
-            input_mask.append(sent_input_mask)
-            speaker_ids.append(sent_speaker_ids)
-        input_ids = np.array(input_ids)
-        input_mask = np.array(input_mask)
-        speaker_ids = np.array(speaker_ids)
-        assert num_words == np.sum(input_mask), (num_words, np.sum(input_mask))
+        for data in example:
+            for par in dat['paragraphs']:
+                tok = self.tokenizer.tokenize(
+                    '[CLS]' + par['context'] + '[SEP]',
+                    max_length=max_sentence_len,
+                    truncation=True,
+                    return_offsets_mapping=True
+                )
+                ids = tok['input_ids']
+                slen = len(ids)
+                msk = [1] * slen
+                ids += [0] * (max_sentence_len - slen)
+                msk += [0] * (max_sentence_len - slen)
 
-        # Keep info to store
-        doc_key = example['doc_key']
-        self.stored_info['subtoken_maps'][doc_key] = example.get('subtoken_map', None)
-        self.stored_info['gold'][doc_key] = example['clusters']
-        # self.stored_info['constituents'][doc_key] = example['constituents']
-        # self.stored_info['tokens'][doc_key] = example['tokens']
+                start_mp = {}
+                end_mp = {}
+                for i, (l, r) in enumerate(tok['offset_mapping']):
+                    start_mp[l] = i
+                    end_mp[r] = i + 1
 
-        # Construct example
-        genre = self.stored_info['genre_dict'].get(doc_key[:2], 0)
-        gold_starts, gold_ends = self._tensorize_spans(gold_mentions)
-        coreferable_starts, coreferable_ends = self._tensorize_spans(gold_coreferables) if gold_coreferables is not None else (None, None)
-        constituent_starts, constituent_ends = self._tensorize_spans(gold_constituents) if gold_constituents is not None else (None, None)
-        constituent_type = np.array(gold_constituent_type) if gold_constituent_type is not None else None
-        
-        example_tensor = (input_ids, input_mask, speaker_ids, sentence_len, genre, sentence_map, is_training,
-                          gold_starts, gold_ends, gold_mention_cluster_map, coreferable_starts, coreferable_ends, 
-                          constituent_starts, constituent_ends, constituent_type)
-        if is_training and len(sentences) > self.config['max_training_sentences']:
-            return doc_key, self.truncate_example(*example_tensor, max_sentences=self.config['max_training_sentences'])
-        else:
-            return doc_key, example_tensor
+                for q in par['qas']:
+                    que = tokenizer.tokenize(
+                        q['question'],
+                        max_length=max_sentence_len,
+                        truncation=True
+                    )
+                    que = ['[CLS]'] + que + ['[SEP]']
+                    que = que + ['[PAD]'] * (max_sentence_len - len(que))
+                    attn_mask = [1 if token != '[PAD]' else 0 for token in que]
+                    seg_ids = [0] * len(que)
+                    que = self.tokenizer.convert_tokens_to_ids(que)
+                    que = torch.tensor(que).unsqueeze(0) 
+                    attn_mask = torch.tensor(attn_mask).unsqueeze(0) 
+                    seg_ids = torch.tensor(seg_ids).unsqueeze(0)
+                    hidden_reps, cls_head = self.bert(que, attention_mask=attn_mask,token_type_ids=seg_ids)
+
+                    input_ids.append(ids)
+                    input_mask.append(msk)
+                    sentence_len.append(slen)
+                    question_emb.append(cls_head[0].detach().cpu().numpy())
+
+                    golds = [(i['answer_start'], i['answer_start'] + len(i['text'].strip())) for i in q['answers']]
+                    for i in golds:
+                        assert i[0] in start_mp
+                        assert i[1] in end_mp
+                    golds = [(start_mp[l], end_mp[r]) for l, r in golds]
+                    gold_start, gold_end = np.array(golds).T
+
+                    gold_starts.append(gold_start)
+                    gold_ends.append(gold_end)
+                    gold_mention_cluster_map.append([1] * len(golds))
+
+        return (input_ids, input_mask, sentence_len, question_emb, is_training, gold_starts, gold_ends, gold_mention_cluster_map)
+
 
     def truncate_example(self, input_ids, input_mask, speaker_ids, sentence_len, genre, sentence_map, is_training,
                          gold_starts, gold_ends, gold_mention_cluster_map, coreferable_starts, coreferable_ends,
