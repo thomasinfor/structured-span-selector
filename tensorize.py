@@ -8,6 +8,7 @@ import json
 import pickle
 import logging
 import torch
+from bert_modelling import BertModel
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ class Tensorizer:
         self.stored_info['gold'] = {}  # {doc_key: ...}
         self.stored_info['genre_dict'] = {genre: idx for idx, genre in enumerate(config['genres'])}
         self.stored_info['constituents'] = {}
-        self.bert = BertModel.from_pretrained(self.config['bert_pretrained_name_or_path'])
+        self.bert = BertModel.from_pretrained('bert-base-uncased')
 
     def _tensorize_spans(self, spans):
         if len(spans) > 0:
@@ -129,13 +130,17 @@ class Tensorizer:
         gold_mention_cluster_map = []
 
         for data in example:
-            for par in dat['paragraphs']:
-                tok = self.tokenizer.tokenize(
-                    '[CLS]' + par['context'] + '[SEP]',
+            print('data')
+            for par in data['paragraphs']:
+                print('par')
+                tok = self.tokenizer(
+                    # '[CLS]' + par['context'] + '[SEP]',
+                    par['context'],
                     max_length=max_sentence_len,
                     truncation=True,
                     return_offsets_mapping=True
                 )
+                # print(tok)
                 ids = tok['input_ids']
                 slen = len(ids)
                 msk = [1] * slen
@@ -148,8 +153,9 @@ class Tensorizer:
                     start_mp[l] = i
                     end_mp[r] = i + 1
 
+                # print(start_mp, end_mp)
                 for q in par['qas']:
-                    que = tokenizer.tokenize(
+                    que = self.tokenizer.tokenize(
                         q['question'],
                         max_length=max_sentence_len,
                         truncation=True
@@ -162,7 +168,8 @@ class Tensorizer:
                     que = torch.tensor(que).unsqueeze(0) 
                     attn_mask = torch.tensor(attn_mask).unsqueeze(0) 
                     seg_ids = torch.tensor(seg_ids).unsqueeze(0)
-                    hidden_reps, cls_head = self.bert(que, attention_mask=attn_mask,token_type_ids=seg_ids)
+                    x = self.bert(que, attention_mask=attn_mask, token_type_ids=seg_ids)
+                    hidden_reps, cls_head = x[0], x[1]
 
                     input_ids.append(ids)
                     input_mask.append(msk)
@@ -170,6 +177,7 @@ class Tensorizer:
                     question_emb.append(cls_head[0].detach().cpu().numpy())
 
                     golds = [(i['answer_start'], i['answer_start'] + len(i['text'].strip())) for i in q['answers']]
+                    # print(golds)
                     for i in golds:
                         assert i[0] in start_mp
                         assert i[1] in end_mp
@@ -220,3 +228,7 @@ class Tensorizer:
         return input_ids, input_mask, speaker_ids, sentence_len, genre, sentence_map, \
                is_training, gold_starts, gold_ends, gold_mention_cluster_map, coreferable_starts, coreferable_ends, \
                constituent_starts, constituent_ends, constituent_type
+
+if __name__ == '__main__':
+    config = util.initialize_config('spanbert_large')
+    x = CorefDataProcessor(config)
