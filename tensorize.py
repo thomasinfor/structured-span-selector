@@ -162,31 +162,40 @@ class Tensorizer:
                     )
                     que = ['[CLS]'] + que + ['[SEP]']
                     que = que + ['[PAD]'] * (max_sentence_len - len(que))
-                    attn_mask = [1 if token != '[PAD]' else 0 for token in que]
-                    seg_ids = [0] * len(que)
                     que = self.tokenizer.convert_tokens_to_ids(que)
-                    que = torch.tensor(que).unsqueeze(0) 
-                    attn_mask = torch.tensor(attn_mask).unsqueeze(0) 
-                    seg_ids = torch.tensor(seg_ids).unsqueeze(0)
-                    x = self.bert(que, attention_mask=attn_mask, token_type_ids=seg_ids)
-                    hidden_reps, cls_head = x[0], x[1]
 
                     input_ids.append(ids)
                     input_mask.append(msk)
                     sentence_len.append(slen)
-                    question_emb.append(cls_head[0].detach().cpu().numpy())
+                    question_emb.append(que)
 
                     golds = [(i['answer_start'], i['answer_start'] + len(i['text'].strip())) for i in q['answers']]
                     # print(golds)
                     for i in golds:
-                        assert i[0] in start_mp
-                        assert i[1] in end_mp
+                        if not (i[0] in start_mp and i[1] in end_mp):
+                            print('No match: ', par['context'], i[0], par['context'][i[0]:i[1]])
+                    golds = [i for i in golds if i[0] in start_mp and i[1] in end_mp]
                     golds = [(start_mp[l], end_mp[r]) for l, r in golds]
-                    gold_start, gold_end = np.array(golds).T
+                    if len(golds):
+                        gold_start, gold_end = np.array(golds).T
+                    else:
+                        gold_start, gold_end = [], []
 
                     gold_starts.append(gold_start)
                     gold_ends.append(gold_end)
                     gold_mention_cluster_map.append([1] * len(golds))
+
+        question_emb = torch.tensor(question_emb, dtype=torch.long)
+        attn_mask = (question_emb != 0).to(torch.long)
+        seg_ids = torch.zeros(question_emb.shape, dtype=torch.long)
+        batch_size = 32
+        for i in range((len(question_emb) + batch_size-1) // batch_size):
+            s = slice(i * batch_size, (i+1) * batch_size)
+            x = self.bert(question_emb[s], attention_mask=attn_mask[s], token_type_ids=seg_ids[s])
+            hidden_reps, cls_head = x[0], x[1]
+            question_emb[s] = cls_head.detach().cpu().numpy()
+
+        print(question_emb)
 
         return (input_ids, input_mask, sentence_len, question_emb, is_training, gold_starts, gold_ends, gold_mention_cluster_map)
 
