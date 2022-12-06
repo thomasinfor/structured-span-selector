@@ -313,7 +313,7 @@ class CorefModel(torch.nn.Module):
         if do_loss:
             # loss = same_span.sum()
             # or negative score - positive score
-            loss = top_span_mention_scores[torch.logical_not(same_span)] - top_span_mention_scores[same_span]
+            loss = top_span_mention_scores[torch.logical_not(same_span)].sum() - top_span_mention_scores[same_span].sum()
             return [candidate_starts, candidate_ends, candidate_mention_parsing_scores, top_span_starts, top_span_ends], loss
         else:
             return candidate_starts, candidate_ends, candidate_mention_parsing_scores, top_span_starts, top_span_ends
