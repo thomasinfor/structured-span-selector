@@ -326,6 +326,7 @@ class Runner:
 
 if __name__ == '__main__':
     config_name, gpu_id = sys.argv[1], int(sys.argv[2])
+    gpu_id = gpu_id if gpu_id >= 0 else None
     saved_suffix = sys.argv[3] if len(sys.argv) >= 4 else None
     runner = Runner(config_name, gpu_id)
     model = runner.initialize_model(saved_suffix)

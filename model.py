@@ -72,9 +72,9 @@ class CorefModel(torch.nn.Module):
 
         self.mention_token_attn = self.make_ffnn(self.bert_emb_size, 0, output_size=1) if config['model_heads'] else None
         if type(self.mention_proposer) == CFGMentionProposer:
-            self.span_emb_scorer = self.make_ffnn(self.span_emb_size + self.bert_emb_size, [config['ffnn_size']] * config['ffnn_depth'], output_size=2)
+            self.span_emb_scorer = self.make_ffnn(self.span_emb_size + 768, [config['ffnn_size']] * config['ffnn_depth'], output_size=2)
             def span_emb_score_ffnn(candidate_span_emb, question_emb):
-                question_emb = question_emb.unsqueeze(0).expand(len(x), -1)
+                question_emb = question_emb.unsqueeze(0).expand(len(candidate_span_emb), -1)
                 emb = torch.cat([candidate_span_emb, question_emb], dim=-1)
                 return self.span_emb_scorer(emb)
             self.span_emb_score_ffnn = span_emb_score_ffnn
@@ -173,11 +173,11 @@ class CorefModel(torch.nn.Module):
         gold_mention_cluster_map=None,
     ):
         
-        mention_doc = self.bert(input_ids.unsqueeze(-1), attention_mask=input_mask.unsqueeze(-1))  # [num seg, num max tokens, emb size]
+        mention_doc = self.bert(input_ids.unsqueeze(0), attention_mask=input_mask.unsqueeze(0))  # [num seg, num max tokens, emb size]
         mention_doc = mention_doc["last_hidden_state"]
         input_mask = input_mask.bool()
-        mention_doc = mention_doc[input_mask]
-        return mention_doc[0]
+        mention_doc = mention_doc[0][input_mask]
+        return mention_doc
         
 
     def get_predictions_and_loss(
@@ -207,7 +207,7 @@ class CorefModel(torch.nn.Module):
         # speaker_ids = speaker_ids[input_mask]
         num_words = mention_doc.shape[0]
 
-        sentence_map = torch.zeros(num_words, 1, device=device)
+        sentence_map = torch.zeros(num_words, device=device, dtype=torch.long)
         
         self.all_words += num_words
         
@@ -233,7 +233,6 @@ class CorefModel(torch.nn.Module):
             same_span = (same_start & same_end).long()
             candidate_labels = torch.matmul(gold_mention_cluster_map.unsqueeze(0).type_as(mention_doc), same_span.type_as(mention_doc))
             candidate_labels = candidate_labels.long().squeeze()  # [num candidates]; non-gold span has label 0
-            
             
         # Get span embedding
         span_start_emb, span_end_emb = mention_doc[candidate_starts], mention_doc[candidate_ends]
