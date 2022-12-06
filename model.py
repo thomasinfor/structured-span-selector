@@ -177,7 +177,7 @@ class CorefModel(torch.nn.Module):
         mention_doc = mention_doc[input_mask]
         return mention_doc
         
-    
+
     def get_predictions_and_loss(
         self,
         input_ids,
@@ -315,6 +315,9 @@ class CorefModel(torch.nn.Module):
             return [candidate_starts, candidate_ends, candidate_mention_parsing_scores, top_span_starts, top_span_ends], loss
         else:
             return candidate_starts, candidate_ends, candidate_mention_parsing_scores, top_span_starts, top_span_ends
+
+
+        """
         # Coarse pruning on each mention's antecedents
         max_top_antecedents = min(num_top_spans, conf['max_top_antecedents'])
         top_span_range = torch.arange(0, num_top_spans, device=device)
@@ -439,6 +442,7 @@ class CorefModel(torch.nn.Module):
             loss = (log_norm - log_marginalized_antecedent_scores).sum()
 
             return [candidate_starts, candidate_ends, candidate_mention_parsing_scores, top_span_starts, top_span_ends, top_antecedent_idx, top_antecedent_scores], loss
+        """
             
     def _extract_top_spans(self, candidate_idx_sorted, candidate_starts, candidate_ends, num_top_spans):
         """ Keep top non-cross-overlapping candidates ordered by scores; compute on CPU because of loop """

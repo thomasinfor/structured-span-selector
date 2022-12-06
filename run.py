@@ -103,7 +103,7 @@ class Runner:
         for epo in range(epochs):
             print("EPOCH", epo)
             random.shuffle(examples_train)  # Shuffle training set
-            for doc_key, example in examples_train:
+            for example in examples_train:
                 # Forward pass
                 model.train()
                 example_gpu = [d.to(self.device) if d is not None else None for d in example]
@@ -167,21 +167,21 @@ class Runner:
                         tb_writer.add_scalar('Learning_Rate_Task', schedulers[1].get_last_lr()[-1], len(loss_history))
 
                     # Evaluate
-                    if len(loss_history) > 0 and len(loss_history) % conf['eval_frequency'] == 0:
-                        # Testing Dev
-                        logger.info('Dev')
-                        f1, _ = self.evaluate(model, examples_dev, stored_info, len(loss_history), official=False, conll_path=self.config['conll_eval_path'], tb_writer=tb_writer)
-                        # Testing Test
-                        logger.info('Test')
-                        f1_test = 0.
-                        if f1 > max_f1 or f1_test > max_f1_test:
-                            max_f1 = max(max_f1, f1)
-                            max_f1_test = 0. # max(max_f1_test, f1_test)
-                            self.save_model_checkpoint(model, len(loss_history))
+                    # if len(loss_history) > 0 and len(loss_history) % conf['eval_frequency'] == 0:
+                    #     # Testing Dev
+                    #     logger.info('Dev')
+                    #     f1, _ = self.evaluate(model, examples_dev, stored_info, len(loss_history), official=False, conll_path=self.config['conll_eval_path'], tb_writer=tb_writer)
+                    #     # Testing Test
+                    #     logger.info('Test')
+                    #     f1_test = 0.
+                    #     if f1 > max_f1 or f1_test > max_f1_test:
+                    #         max_f1 = max(max_f1, f1)
+                    #         max_f1_test = 0. # max(max_f1_test, f1_test)
+                    #         self.save_model_checkpoint(model, len(loss_history))
                         
-                        logger.info('Eval max f1: %.2f' % max_f1)
-                        logger.info('Test max f1: %.2f' % max_f1_test)
-                        start_time = time.time()
+                    #     logger.info('Eval max f1: %.2f' % max_f1)
+                    #     logger.info('Test max f1: %.2f' % max_f1_test)
+                    #     start_time = time.time()
 
         logger.info('**********Finished training**********')
         logger.info('Actual update steps: %d' % len(loss_history))
@@ -191,6 +191,7 @@ class Runner:
         return loss_history
 
     def evaluate(self, model, tensor_examples, stored_info, step, official=False, conll_path=None, tb_writer=None, predict=False):
+        return 0, 0
         logger.info('Step %d: evaluating on %d samples...' % (step, len(tensor_examples)))
         
         model.to(self.device)
@@ -256,7 +257,7 @@ class Runner:
         model.eval()
         predicted_spans, predicted_antecedents, predicted_clusters = [], [], []
 
-        for i,  (doc_key, tensor_example)  in enumerate(tensor_examples):
+        for i,  tensor_example  in enumerate(tensor_examples):
             tensor_example = tensor_example[:7]
             example_gpu = [d.to(self.device) for d in tensor_example]
             with torch.no_grad():
