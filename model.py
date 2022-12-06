@@ -8,7 +8,9 @@ from transformers import   BertTokenizer
 
 import logging
 import numpy as np
-from collections import Iterable, defaultdict
+from collections import defaultdict
+try: from collections import Iterable
+except: from collections.abc import Iterable
 
 from outside_mp import CFGMentionProposer
 from greedy_mp import GreedyMentionProposer
