@@ -97,8 +97,8 @@ class Tensorizer:
         self.stored_info['constituents'] = {}
         self.bert = BertModel.from_pretrained('bert-base-uncased')
         # print('============', next(self.bert.parameters()).device)
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.bert.to(device)
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.bert.to(self.device)
         # print('============', next(self.bert.parameters()).device)
 
     def _tensorize_spans(self, spans):
@@ -199,7 +199,7 @@ class Tensorizer:
         for i in range((len(question) + batch_size-1) // batch_size):
             print(i * batch_size, len(question))
             s = slice(i * batch_size, (i+1) * batch_size)
-            x = self.bert(question[s], attention_mask=attn_mask[s], token_type_ids=seg_ids[s])
+            x = self.bert(question[s].to(self.device), attention_mask=attn_mask[s].to(self.device), token_type_ids=seg_ids[s].to(self.device))
             hidden_reps, cls_head = x[0], x[1]
             question_emb.append(cls_head.detach().cpu().numpy())
 
