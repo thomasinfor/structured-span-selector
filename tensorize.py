@@ -34,9 +34,9 @@ class CorefDataProcessor:
                 self.tensor_samples = {}
                 tensorizer = Tensorizer(self.config)
                 paths = {
+                    'tst': join(self.data_dir, f'test.json'),
                     'trn': join(self.data_dir, f'train.json'),
                     'dev': join(self.data_dir, f'dev.json'),
-                    'tst': join(self.data_dir, f'test.json')
                 }
                 for split, path in paths.items():
                     logger.info('Tensorizing examples from %s; results will be cached)' % path)
@@ -203,7 +203,8 @@ class Tensorizer:
             hidden_reps, cls_head = x[0], x[1]
             question_emb.append(cls_head.detach().cpu().numpy())
 
-        question_emb = np.concatenate(question_emb)
+        if len(question_emb): question_emb = np.concatenate(question_emb)
+        else: question_emb = np.array([])
         print(question_emb.shape, question_emb)
 
         is_training = [True] * len(input_ids)
