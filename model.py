@@ -173,15 +173,16 @@ class CorefModel(torch.nn.Module):
         gold_mention_cluster_map=None,
     ):
         
-        mention_doc = self.bert(input_ids, attention_mask=input_mask)  # [num seg, num max tokens, emb size]
+        mention_doc = self.bert(input_ids.unsqueeze(-1), attention_mask=input_mask.unsqueeze(-1))  # [num seg, num max tokens, emb size]
         mention_doc = mention_doc["last_hidden_state"]
         input_mask = input_mask.bool()
         mention_doc = mention_doc[input_mask]
-        return mention_doc
+        return mention_doc[0]
         
 
     def get_predictions_and_loss(
         self,
+        mention_doc,
         input_ids,
         input_mask,
         sentence_len,
