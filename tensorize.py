@@ -45,7 +45,10 @@ class CorefDataProcessor:
                         samples = json.load(f)['data']
                     tensor_samples = tensorizer.tensorize_example(samples, is_training)
                     print(len(tensor_samples[0]))
-                    self.tensor_samples[split] = [self.convert_to_torch_tensor(*tensor) for tensor in tensor_samples]
+                    self.tensor_samples[split] = [
+                        self.convert_to_torch_tensor(*[x[i] for x in tensor_samples])
+                    for i in range(len(tensor_samples[0]))]
+                # print(self.tensor_samples)
                 self.stored_info = tensorizer.stored_info
                 # Cache tensorized samples
                 with open(cache_path, 'wb') as f:
@@ -57,9 +60,8 @@ class CorefDataProcessor:
         
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         input_mask = torch.tensor(input_mask, dtype=torch.long)
-        speaker_ids = torch.tensor(speaker_ids, dtype=torch.long)
         sentence_len = torch.tensor(sentence_len, dtype=torch.long)
-        question_emb = torch.tensor(sentence_len, dtype=torch.float)
+        question_emb = torch.tensor(question_emb, dtype=torch.float)
         is_training = torch.tensor(is_training, dtype=torch.bool)
         gold_starts = torch.tensor(gold_starts, dtype=torch.long)
         gold_ends = torch.tensor(gold_ends, dtype=torch.long)
@@ -191,6 +193,7 @@ class Tensorizer:
         batch_size = 32
         question_emb = []
         for i in range((len(question) + batch_size-1) // batch_size):
+            print(i * batch_size, len(question))
             s = slice(i * batch_size, (i+1) * batch_size)
             x = self.bert(question[s], attention_mask=attn_mask[s], token_type_ids=seg_ids[s])
             hidden_reps, cls_head = x[0], x[1]
@@ -199,6 +202,7 @@ class Tensorizer:
         question_emb = np.concatenate(question_emb)
         print(question_emb.shape, question_emb)
 
+        is_training = [True] * len(input_ids)
         return (input_ids, input_mask, sentence_len, question_emb, is_training, gold_starts, gold_ends, gold_mention_cluster_map)
 
 
