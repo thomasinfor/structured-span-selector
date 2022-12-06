@@ -124,7 +124,7 @@ class Tensorizer:
         input_ids                = []
         input_mask               = []
         sentence_len             = []
-        question_emb             = []
+        question                 = []
         gold_starts              = []
         gold_ends                = []
         gold_mention_cluster_map = []
@@ -167,7 +167,7 @@ class Tensorizer:
                     input_ids.append(ids)
                     input_mask.append(msk)
                     sentence_len.append(slen)
-                    question_emb.append(que)
+                    question.append(que)
 
                     golds = [(i['answer_start'], i['answer_start'] + len(i['text'].strip())) for i in q['answers']]
                     # print(golds)
@@ -185,17 +185,19 @@ class Tensorizer:
                     gold_ends.append(gold_end)
                     gold_mention_cluster_map.append([1] * len(golds))
 
-        question_emb = torch.tensor(question_emb, dtype=torch.long)
-        attn_mask = (question_emb != 0).to(torch.long)
-        seg_ids = torch.zeros(question_emb.shape, dtype=torch.long)
+        question = torch.tensor(question, dtype=torch.long)
+        attn_mask = (question != 0).to(torch.long)
+        seg_ids = torch.zeros(question.shape, dtype=torch.long)
         batch_size = 32
-        for i in range((len(question_emb) + batch_size-1) // batch_size):
+        question_emb = []
+        for i in range((len(question) + batch_size-1) // batch_size):
             s = slice(i * batch_size, (i+1) * batch_size)
-            x = self.bert(question_emb[s], attention_mask=attn_mask[s], token_type_ids=seg_ids[s])
+            x = self.bert(question[s], attention_mask=attn_mask[s], token_type_ids=seg_ids[s])
             hidden_reps, cls_head = x[0], x[1]
-            question_emb[s] = cls_head.detach().cpu().numpy()
+            question_emb.append(cls_head.detach().cpu().numpy())
 
-        print(question_emb)
+        question_emb = np.concatenate(question_emb)
+        print(question_emb.shape, question_emb)
 
         return (input_ids, input_mask, sentence_len, question_emb, is_training, gold_starts, gold_ends, gold_mention_cluster_map)
 
