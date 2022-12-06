@@ -96,6 +96,10 @@ class Tensorizer:
         self.stored_info['genre_dict'] = {genre: idx for idx, genre in enumerate(config['genres'])}
         self.stored_info['constituents'] = {}
         self.bert = BertModel.from_pretrained('bert-base-uncased')
+        # print('============', next(self.bert.parameters()).device)
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.bert.to(device)
+        # print('============', next(self.bert.parameters()).device)
 
     def _tensorize_spans(self, spans):
         if len(spans) > 0:
