@@ -72,7 +72,11 @@ class CorefModel(torch.nn.Module):
 
         self.mention_token_attn = self.make_ffnn(self.bert_emb_size, 0, output_size=1) if config['model_heads'] else None
         if type(self.mention_proposer) == CFGMentionProposer:
-            self.span_emb_scorer = self.make_ffnn(self.span_emb_size + 768, [config['ffnn_size']] * config['ffnn_depth'], output_size=2)
+            sz = self.span_emb_size + 768
+            self.span_emb_scorer = nn.Sequential(
+                nn.BatchNorm1d(sz),
+                self.make_ffnn(sz, [config['ffnn_size']] * config['ffnn_depth'], output_size=2),
+            )
             def span_emb_score_ffnn(candidate_span_emb, question_emb):
                 question_emb = question_emb.unsqueeze(0).expand(len(candidate_span_emb), -1)
                 emb = torch.cat([candidate_span_emb, question_emb], dim=-1)
